@@ -9,7 +9,8 @@
 #include <math.h>
 
 
-AudioManager::AudioManager() : currentSong(0), fade(FADE_NONE) {
+AudioManager::AudioManager() 
+	: currentSong{0}, fade{FADE_NONE} {
 	//init system
 	FMOD::System_Create(&system);
 	system->init(100, FMOD_INIT_NORMAL, 0);
@@ -168,3 +169,80 @@ float RandomBetween(float min, float max) {
 	return min + n * (max - min);
 }
 
+
+void AudioManager::PlaySong(const std::string& path) {
+	//ignore if the song is already playing
+	if(currentSongPath == path) return;
+
+	//if a song is playing, stop them and set this as next song
+	if(currentSong != 0) {
+		StopSongs();
+		nextSongPath = path;
+		return;
+	}
+	//find the song in the corresponding sound map
+	SoundMap::iterator sound = sounds[CATEGORY_SONG].find(path);
+	if(sound == sounds[CATEGORY_SONG].end()) return;
+	
+	//start playing song with volume set to 0 and fade in
+	currentSongPath = path;
+	system->playSound(sound->second,0, true, &currentSong);
+	currentSong->setChannelGroup(groups[CATEGORY_SONG]);
+	currentSong->setVolume(0.0f);
+	currentSong->setPaused(false);
+	fade = FADE_IN;
+}
+
+//trigger fadeout if a song is playing and clear any pending song requests
+void AudioManager::StopSongs() {
+	if(currentSong != 0)
+		fade = FADE_OUT;
+	nextSongPath.clear();
+}
+
+//if a song is playing and we are fading in, increase volume of current song a bit. Once it reaches one, stop fading
+//if a song is fading out, do the opposite.
+//if no song is playing and there is a song set up to play next then play it
+
+void AudioManager::Update(float elapsed){
+	const float fadeTime = 1.0f;
+	if(currentSong != 0 && fade == FADE_IN){
+		float volume;
+		currentSong->getVolume(&volume);
+		float nextVolume = volume + elapsed / fadeTime;
+		if(nextVolume > 1.0f) {
+			currentSong->setVolume(1.0f);
+			fade = FADE_NONE;
+		} else {
+			currentSong->setVolume(nextVolume);
+		}
+	} else if(currentSong != 0 && fade == FADE_OUT) {
+		float volume;
+		currentSong->getVolume(&volume);
+		float nextVolume = volume - elapsed / fadeTime;
+		if(nextVolume <= 0.0f) {
+			currentSong->stop();
+			currentSong = 0;
+			currentSongPath.clear();
+			fade = FADE_NONE;
+		} else {
+			currentSong->setVolume(nextVolume);
+		}
+	} else if(currentSong == 0 && !nextSongPath.empty()) {
+		PlaySong(nextSongPath);
+		nextSongPath.clear();
+	}
+	system->update();
+}
+
+void AudioManager::SetMasterVolume(float volume) {
+	master->setVolume(volume);
+}
+
+void AudioManager::SetSFXsVolume(float volume) {
+	groups[CATEGORY_SFX]->setVolume(volume);
+}
+
+void AudioManager::SetSongsVolume(float volume) {
+	groups[CATEGORY_SONG]->setVolume(volume);
+}
